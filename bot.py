@@ -49,7 +49,7 @@ def handle_photo(message):
             if len(trans_date) == 8:
                 trans_date = f"{trans_date[6:8]}/{trans_date[4:6]}/{trans_date[0:4]}"
                 
-            msg = (f"✅ **สลิปถูกต้อง / ของจริง**\n\n"
+            msg = (f"✅ **สลิปถูกต้อง**\n\n"
                    f"👤 **ผู้โอน:** {sender}\n"
                    f"🏦 **ผู้รับ:** {receiver}\n"
                    f"💰 **ยอดเงิน:** {amount} บาท\n"
