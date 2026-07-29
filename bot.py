@@ -4,13 +4,22 @@ import os
 import threading
 from flask import Flask
 
-# ดึงค่าจาก Environment Variables ของ Render
+# ดึงค่าจาก Environment Variables
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 SLIPOK_BRANCH_ID = os.environ.get('SLIPOK_BRANCH_ID')
 SLIPOK_API_KEY = os.environ.get('SLIPOK_API_KEY')
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
+
+# ==========================================
+# ⚙️ ระบบโควต้าแบบกำหนดเอง (แอดมินคุม)
+# ==========================================
+# ⚠️ ใส่ Telegram ID ของคุณที่นี่ เพื่อให้คุณสั่งเติมโควต้าได้คนเดียว
+ADMIN_ID = 1297140269 
+
+# ตั้งค่าโควต้าเริ่มต้น
+current_quota = 100 
 
 @app.route('/')
 def home():
@@ -21,32 +30,41 @@ def run_server():
     app.run(host='0.0.0.0', port=port)
 
 # ==========================================
-# 🔍 ฟังก์ชันดึงโควต้าจริงจากระบบ SlipOK
-# ==========================================
-def get_slipok_quota():
-    url = f"https://api.slipok.com/api/line/apikey/{SLIPOK_BRANCH_ID}"
-    headers = {'x-authorization': SLIPOK_API_KEY}
-    try:
-        # ใช้ requests.get เพื่อดึงข้อมูลโปรเจกต์ (ไม่โดนหักโควต้าสแกน)
-        response = requests.get(url, headers=headers)
-        result = response.json()
-        if response.status_code == 200 and result.get('success'):
-            # ดึงตัวเลข quota ออกมา
-            return result.get('data', {}).get('quota', 0)
-    except Exception as e:
-        print("Error checking quota:", e)
-    return None
-
-# ==========================================
-# 💬 คำสั่งเช็คโควต้า (พิมพ์ใน Telegram)
+# 💬 คำสั่งจัดการโควต้า 
 # ==========================================
 @bot.message_handler(commands=['quota'])
-def check_quota_command(message):
-    quota = get_slipok_quota()
-    if quota is not None:
-        bot.reply_to(message, f"📊 โควต้าในเว็บ SlipOK ของคุณเหลือ: **{quota}** ครั้ง", parse_mode='Markdown')
-    else:
-        bot.reply_to(message, "⚠️ ไม่สามารถเชื่อมต่อกับระบบ SlipOK เพื่อเช็คโควต้าได้ในขณะนี้ครับ")
+def check_quota(message):
+    bot.reply_to(message, f"📊 โควต้าตรวจสลิปปัจจุบัน: {current_quota} ครั้ง")
+
+@bot.message_handler(commands=['addquota'])
+def add_quota(message):
+    global current_quota
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ คุณไม่มีสิทธิ์ใช้งานคำสั่งนี้ครับ")
+        return
+    try:
+        amount = int(message.text.split()[1])
+        current_quota += amount
+        if current_quota < 1:
+            current_quota = 1 # บังคับไม่ให้ต่ำกว่า 1
+        bot.reply_to(message, f"✅ เติมโควต้าให้ {amount} ครั้ง\n📊 โควต้าปัจจุบัน: {current_quota} ครั้ง")
+    except:
+        bot.reply_to(message, "⚠️ รูปแบบผิดครับ ต้องพิมพ์ตัวเลขด้วย เช่น: /addquota 50")
+
+@bot.message_handler(commands=['setquota'])
+def set_quota(message):
+    global current_quota
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ คุณไม่มีสิทธิ์ใช้งานคำสั่งนี้ครับ")
+        return
+    try:
+        amount = int(message.text.split()[1])
+        if amount < 1:
+            amount = 1 # บังคับไม่ให้ต่ำกว่า 1
+        current_quota = amount
+        bot.reply_to(message, f"✅ ตั้งค่าโควต้าใหม่เป็น {current_quota} ครั้งเรียบร้อย")
+    except:
+        bot.reply_to(message, "⚠️ รูปแบบผิดครับ ต้องพิมพ์ตัวเลขด้วย เช่น: /setquota 100")
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
@@ -57,13 +75,11 @@ def send_welcome(message):
 # ==========================================
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
-    
-    # 1. ให้บอทเช็คโควต้า SlipOK ก่อนทำอย่างอื่น
-    current_quota = get_slipok_quota()
-    
-    # ถ้าดึงข้อมูลสำเร็จ และพบว่าโควต้าเหลือ 1 หรือน้อยกว่า ให้หยุดทำงาน
-    if current_quota is not None and current_quota <= 1:
-        bot.reply_to(message, "❌ **โควต้าตรวจสลิปใน SlipOK เหลือ 1 หรือหมดแล้ว!**\nบอทจะหยุดตรวจชั่วคราว กรุณาไปต่ออายุหรือเพิ่มโควต้าในเว็บ SlipOK ก่อนนะครับ", parse_mode='Markdown')
+    global current_quota
+
+    # 1. เช็คโควต้าก่อน: ถ้าเท่ากับ 1 (หรือน้อยกว่า) บอทจะไม่ทำงาน
+    if current_quota <= 1:
+        bot.reply_to(message, "❌ **บอทหยุดทำงาน!**\nโควต้าการสแกนอยู่ที่ 1 กรุณาให้แอดมินเพิ่มโควต้าเพื่อใช้งานต่อครับ", parse_mode='Markdown')
         return
 
     try:
@@ -90,18 +106,24 @@ def handle_photo(message):
             trans_date = data.get('transDate', '')
             trans_time = data.get('transTime', '')
 
+            # 2. หักโควต้าเมื่อสแกนสำเร็จ
+            current_quota -= 1
+            if current_quota < 1:
+                current_quota = 1 # กันเหนียวไม่ให้ต่ำกว่า 1
+
             # จัดรูปแบบข้อความตอบกลับ
             text_reply = (
                 "✅ **สลิปถูกต้อง**\n\n"
                 f"👤 ผู้โอน: {sender}\n"
                 f"🏦 ผู้รับ: {receiver}\n"
                 f"💰 ยอดเงิน: {amount} บาท\n"
-                f"📅 เวลาโอน: {trans_date} {trans_time}"
+                f"📅 เวลาโอน: {trans_date} {trans_time}\n"
+                f"*(เหลือโควต้าใช้งานได้อีก {current_quota - 1} รูป)*"
             )
             bot.reply_to(message, text_reply, parse_mode='Markdown')
 
         else:
-            # สลิปปลอม หรือเช็คไม่ผ่าน
+            # สลิปปลอม หรือเช็คไม่ผ่าน (ไม่หักโควต้า)
             err_msg = result.get('message', 'สแกน QR Code ไม่ผ่าน หรือรูปไม่ชัดเจน')
             bot.reply_to(message, f"❌ **ตรวจสลิปไม่ผ่าน!**\nเหตุผล: {err_msg}", parse_mode='Markdown')
 
