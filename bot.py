@@ -52,7 +52,7 @@ def handle_photo(message):
 
             # จัดรูปแบบข้อความตอบกลับ
             text_reply = (
-                "✅ **สลิปถูกต้อง / ของจริง**\n\n"
+                "✅ **สลิปถูกต้อง**\n\n"
                 f"👤 ผู้โอน: {sender}\n"
                 f"🏦 ผู้รับ: {receiver}\n"
                 f"💰 ยอดเงิน: {amount} บาท\n"
