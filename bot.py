@@ -2,7 +2,9 @@ import telebot
 import requests
 import os
 import threading
+import io
 from flask import Flask
+from PIL import Image, ImageDraw, ImageFont
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 SLIPOK_BRANCH_ID = os.environ.get('SLIPOK_BRANCH_ID')
@@ -29,15 +31,15 @@ def handle_photo(message):
         file_id = message.photo[-1].file_id
         file_info = bot.get_file(file_id)
         downloaded_file = bot.download_file(file_info.file_path)
-        
+
         url = f"https://api.slipok.com/api/line/apikey/{SLIPOK_BRANCH_ID}"
         headers = {'x-authorization': SLIPOK_API_KEY}
         files = {'files': ('slip.jpg', downloaded_file, 'image/jpeg')}
         data_payload = {'log': 'true'}
-        
+
         response = requests.post(url, headers=headers, files=files, data=data_payload)
         result = response.json()
-        
+
         if response.status_code == 200 and result.get('success'):
             data = result.get('data', {})
             sender = data.get('sender', {}).get('displayName', 'ไม่ระบุชื่อ')
@@ -45,23 +47,42 @@ def handle_photo(message):
             amount = data.get('amount', '0.00')
             trans_date = data.get('transDate', '')
             trans_time = data.get('transTime', '')
-            
-            if len(trans_date) == 8:
-                trans_date = f"{trans_date[6:8]}/{trans_date[4:6]}/{trans_date[0:4]}"
-                
-            msg = (f"✅ **สลิปถูกต้อง**\n\n"
-                   f"👤 **ผู้โอน:** {sender}\n"
-                   f"🏦 **ผู้รับ:** {receiver}\n"
-                   f"💰 **ยอดเงิน:** {amount} บาท\n"
-                   f"📅 **เวลาโอน:** {trans_date} {trans_time}")
-            bot.reply_to(message, msg, parse_mode='Markdown')
-            
+
+            # -----------------------------------------
+            # ระบบวาดรูปลง Template
+            # -----------------------------------------
+            try:
+                # 1. เปิดรูปภาพ Template
+                template = Image.open('template.png')
+                draw = ImageDraw.Draw(template)
+
+                # 2. โหลดฟอนต์ (ตัวเลข 40 และ 60 คือขนาดฟอนต์ ปรับได้ตามชอบ)
+                font = ImageFont.truetype('font.ttf', 40)
+                font_amount = ImageFont.truetype('font.ttf', 70) 
+
+                # 3. วาดข้อความ (ตัวเลข 100, 200 คือพิกัด แกนแนวนอน, แกนแนวตั้ง)
+                draw.text((100, 150), f"฿{amount}", font=font_amount, fill="#1B264F")
+                draw.text((100, 300), f"ผู้โอน: {sender}", font=font, fill="#555555")
+                draw.text((100, 400), f"ผู้รับ: {receiver}", font=font, fill="#555555")
+                draw.text((100, 500), f"{trans_date} เวลา {trans_time}", font=font, fill="#888888")
+
+                # 4. เตรียมไฟล์รูปเพื่อส่ง
+                img_byte_arr = io.BytesIO()
+                template.save(img_byte_arr, format='PNG')
+                img_byte_arr.seek(0)
+
+                # 5. ส่งรูปกลับไปในกลุ่ม
+                bot.send_photo(message.chat.id, photo=img_byte_arr, reply_to_message_id=message.message_id)
+
+            except Exception as img_e:
+                bot.reply_to(message, f"❌ เจอข้อผิดพลาดตอนวาดรูป: {img_e}")
+
         else:
             err_msg = result.get('message', 'สแกน QR Code ไม่ผ่าน หรือรูปไม่ชัดเจน')
             bot.reply_to(message, f"❌ **ตรวจสลิปไม่ผ่าน!**\nเหตุผล: {err_msg}", parse_mode='Markdown')
-            
+
     except Exception as e:
-        bot.reply_to(message, "⚠️ **ไม่สามารถตรวจสอบรูปนี้ได้**\nระบบมองไม่เห็น QR Code, สลิปโดนตัดขอบ, หรือเซิร์ฟเวอร์ขัดข้อง กรุณาส่งสลิปใหม่อีกครั้งครับ", parse_mode='Markdown')
+        bot.reply_to(message, f"⚠️ **ไม่สามารถตรวจสอบรูปนี้ได้**\nระบบมองไม่เห็น QR Code, สลิปโดนตัดขอบ, หรือเซิร์ฟเวอร์ขัดข้อง กรุณาส่งสลิปใหม่อีกครั้งครับ", parse_mode='Markdown')
 
 if __name__ == "__main__":
     server_thread = threading.Thread(target=run_server)
