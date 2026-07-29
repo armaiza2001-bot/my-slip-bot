@@ -1,90 +1,116 @@
 import telebot
 import requests
-import os
-import threading
 import io
-from flask import Flask
 from PIL import Image, ImageDraw, ImageFont
+from datetime import datetime
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
-SLIPOK_BRANCH_ID = os.environ.get('SLIPOK_BRANCH_ID')
-SLIPOK_API_KEY = os.environ.get('SLIPOK_API_KEY')
+# ==========================================
+# 1. ตั้งค่าพื้นฐาน (อย่าลืมแก้ข้อมูล 3 บรรทัดนี้ให้เป็นของคุณนะครับ!)
+# ==========================================
+BOT_TOKEN = '8848978716:AAHC_WkcpGj8mImJ-VAJumIJbEcOIy_hhsQ'
+SLIPOK_API_KEY = 'SLIPOKFRKZ2O0'
+BRANCH_ID = '72620' # รหัส Branch ID ของคุณ
 
 bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Bot is running!"
-
-def run_server():
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
-
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    bot.reply_to(message, "👋 สวัสดีครับ! ดึงผมเข้ากลุ่มแล้วส่งรูปสลิปโอนเงินมาได้เลย เดี๋ยวผมช่วยตรวจสอบให้")
-
-@bot.message_handler(content_types=['photo'])
-def handle_photo(message):
+# ==========================================
+# ฟังก์ชันย่อย: แปลงวันที่ให้เป็นแบบไทย (เช่น 29 ก.ค. 69)
+# ==========================================
+def format_thai_date(date_str):
     try:
-        file_id = message.photo[-1].file_id
-        file_info = bot.get_file(file_id)
+        # สมมติวันที่มาในรูปแบบ YYYYMMDD
+        date_obj = datetime.strptime(date_str, '%Y%m%d')
+        day = date_obj.day
+        month_names = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+        month = month_names[date_obj.month]
+        year = (date_obj.year + 543) % 100 # เอาแค่ 2 หลักท้ายของปี พ.ศ.
+        return f"{day} {month} {year:02d}"
+    except Exception:
+        return date_str # ถ้าแปลงไม่ได้ให้คืนค่าเดิม
+
+# ==========================================
+# 2. ระบบจัดการเมื่อมีคนส่งรูปเข้ามา
+# ==========================================
+@bot.message_handler(content_types=['photo'])
+def handle_slip(message):
+    try:
+        # ส่งข้อความบอกว่ากำลังโหลด
+        processing_msg = bot.reply_to(message, "⏳ กำลังตรวจสอบสลิป รอสักครู่นะครับ...")
+
+        # ดึงไฟล์รูปจาก Telegram
+        file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
 
-        url = f"https://api.slipok.com/api/line/apikey/{SLIPOK_BRANCH_ID}"
-        headers = {'x-authorization': SLIPOK_API_KEY}
+        # เตรียมข้อมูลส่งไปให้ SlipOK
+        headers = {
+            'x-authorization': SLIPOK_API_KEY
+        }
         files = {'files': ('slip.jpg', downloaded_file, 'image/jpeg')}
-        data_payload = {'log': 'true'}
-
-        response = requests.post(url, headers=headers, files=files, data=data_payload)
+        data = {'branchId': BRANCH_ID}
+        
+        # ⚠️ หมายเหตุ: URL API ตรงนี้ ให้ใช้ URL เดิมจากโค้ดที่คุณเคยใช้แล้วเวิร์คนะครับ
+        api_url = 'https://api.slipok.com/api/line/apikey/xxxx' # <--- แก้ URL ตรงนี้
+        response = requests.post(api_url, headers=headers, files=files, data=data) 
         result = response.json()
 
-        if response.status_code == 200 and result.get('success'):
-            data = result.get('data', {})
-            sender = data.get('sender', {}).get('displayName', 'ไม่ระบุชื่อ')
-            receiver = data.get('receiver', {}).get('displayName', 'ไม่ระบุชื่อ')
-            amount = data.get('amount', '0.00')
-            trans_date = data.get('transDate', '')
-            trans_time = data.get('transTime', '')
+        # ==========================================
+        # 3. ถ้าสลิปถูกต้อง -> เริ่มระบบวาดรูป
+        # ==========================================
+        if result.get('success'): 
+            slip_data = result.get('data', {})
+            
+            # ดึงข้อมูลจาก SlipOK มาเก็บในตัวแปร
+            sender = slip_data.get('sender', {}).get('displayName', 'ไม่ระบุ')
+            receiver = slip_data.get('receiver', {}).get('displayName', 'ไม่ระบุ')
+            amount = str(slip_data.get('amount', '0'))
+            trans_date = slip_data.get('transDate', '20260730')
+            trans_time = slip_data.get('transTime', '00:00')
 
-            # -----------------------------------------
-            # ระบบวาดรูปลง Template
-            # -----------------------------------------
-            try:
-                # 1. เปิดรูปภาพ Template
-                template = Image.open('template.png')
-                draw = ImageDraw.Draw(template)
+            # จัดรูปแบบตัวเลขและวันที่ให้สวยงาม
+            amount_formatted = "{:,.2f}".format(float(amount))
+            thai_date_formatted = format_thai_date(trans_date)
 
-                # 2. โหลดฟอนต์ (ตัวเลข 40 และ 60 คือขนาดฟอนต์ ปรับได้ตามชอบ)
-                font = ImageFont.truetype('NotoSansThaiLooped-Medium.ttf', 40)
-                font_amount = ImageFont.truetype('NotoSansThaiLooped-Medium.ttf', 70) 
+            # โหลดรูปภาพพื้นหลัง (ต้องมีไฟล์นี้ใน GitHub)
+            template = Image.open('template.png')
+            draw = ImageDraw.Draw(template)
 
-                # 3. วาดข้อความ (ตัวเลข 100, 200 คือพิกัด แกนแนวนอน, แกนแนวตั้ง)
-                draw.text((100, 150), f"฿{amount}", font=font_amount, fill="#1B264F")
-                draw.text((100, 300), f"ผู้โอน: {sender}", font=font, fill="#555555")
-                draw.text((100, 400), f"ผู้รับ: {receiver}", font=font, fill="#555555")
-                draw.text((100, 500), f"{trans_date} เวลา {trans_time}", font=font, fill="#888888")
+            # โหลดไฟล์ฟอนต์ (ต้องมีไฟล์นี้ใน GitHub)
+            font = ImageFont.truetype('NotoSansThaiLooped-Medium.ttf', 40)
+            font_bold = ImageFont.truetype('NotoSansThaiLooped-Medium.ttf', 55)
+            font_small = ImageFont.truetype('NotoSansThaiLooped-Medium.ttf', 25)
 
-                # 4. เตรียมไฟล์รูปเพื่อส่ง
-                img_byte_arr = io.BytesIO()
-                template.save(img_byte_arr, format='PNG')
-                img_byte_arr.seek(0)
+            # -----------------------------------------------------------
+            # ⚠️ พิกัด (X, Y) ด้านล่างนี้คือจุดที่บอทจะวางตัวหนังสือ 
+            # คุณต้องลองแก้ตัวเลข 200, 300, 600, 150 ฯลฯ เพื่อขยับข้อความให้ตรงช่องในรูปของคุณ
+            # -----------------------------------------------------------
+            # วาด ยอดเงิน
+            draw.text((200, 300), f"฿{amount_formatted}", font=font_bold, fill="#1B264F") 
+            # วาด วันที่และเวลา
+            draw.text((600, 150), f"{thai_date_formatted}, {trans_time} น.", font=font_small, fill="#888888") 
+            # วาด ชื่อผู้โอน
+            draw.text((600, 450), f"ผู้โอน: {sender}", font=font, fill="#555555") 
+            # วาด ชื่อผู้รับ
+            draw.text((600, 650), f"ผู้รับ: {receiver}", font=font, fill="#555555") 
 
-                # 5. ส่งรูปกลับไปในกลุ่ม
-                bot.send_photo(message.chat.id, photo=img_byte_arr, reply_to_message_id=message.message_id)
-
-            except Exception as img_e:
-                bot.reply_to(message, f"❌ เจอข้อผิดพลาดตอนวาดรูป: {img_e}")
-
+            # ==========================================
+            # 4. แปลงรูปที่วาดเสร็จแล้ว แล้วส่งกลับเข้ากลุ่ม
+            # ==========================================
+            img_byte_arr = io.BytesIO()
+            template.save(img_byte_arr, format='PNG')
+            img_byte_arr.seek(0)
+            
+            # ลบข้อความ "กำลังตรวจสอบ..." ทิ้ง เพื่อความสะอาด
+            bot.delete_message(message.chat.id, processing_msg.message_id)
+            # ส่งภาพใบเสร็จน่ารักๆ กลับไป
+            bot.send_photo(message.chat.id, photo=img_byte_arr, reply_to_message_id=message.message_id)
+        
         else:
-            err_msg = result.get('message', 'สแกน QR Code ไม่ผ่าน หรือรูปไม่ชัดเจน')
-            bot.reply_to(message, f"❌ **ตรวจสลิปไม่ผ่าน!**\nเหตุผล: {err_msg}", parse_mode='Markdown')
+            # กรณีสลิปปลอม หรือเช็คไม่ผ่าน
+            bot.delete_message(message.chat.id, processing_msg.message_id)
+            bot.reply_to(message, "❌ สลิปไม่ถูกต้อง หรือสแกนไม่พบข้อมูลครับ")
 
     except Exception as e:
-        bot.reply_to(message, f"⚠️ **ไม่สามารถตรวจสอบรูปนี้ได้**\nระบบมองไม่เห็น QR Code, สลิปโดนตัดขอบ, หรือเซิร์ฟเวอร์ขัดข้อง กรุณาส่งสลิปใหม่อีกครั้งครับ", parse_mode='Markdown')
+        bot.reply_to(message, f"❌ ระบบเกิดข้อผิดพลาด: {e}")
 
-if __name__ == "__main__":
-    server_thread = threading.Thread(target=run_server)
-    server_thread.start()
-    bot.infinity_polling()
+print("🤖 บอท SlipOK ระบบวาดรูป พร้อมทำงานแล้วครับ!")
+bot.polling()
