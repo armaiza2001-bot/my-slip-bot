@@ -57,8 +57,8 @@ def handle_photo(message):
                 draw = ImageDraw.Draw(template)
 
                 # 2. โหลดฟอนต์ (ตัวเลข 40 และ 60 คือขนาดฟอนต์ ปรับได้ตามชอบ)
-                font = ImageFont.truetype('font.ttf', 40)
-                font_amount = ImageFont.truetype('font.ttf', 70) 
+                font = ImageFont.truetype('NotoSansThaiLooped-Medium.ttf', 40)
+                font_amount = ImageFont.truetype('NotoSansThaiLooped-Medium.ttf', 70) 
 
                 # 3. วาดข้อความ (ตัวเลข 100, 200 คือพิกัด แกนแนวนอน, แกนแนวตั้ง)
                 draw.text((100, 150), f"฿{amount}", font=font_amount, fill="#1B264F")
