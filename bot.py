@@ -125,7 +125,7 @@ def handle_photo(message):
         else:
             # สลิปปลอม หรือเช็คไม่ผ่าน (ไม่หักโควต้า)
             err_msg = result.get('message', 'สแกน QR Code ไม่ผ่าน หรือรูปไม่ชัดเจน')
-            bot.reply_to(message, f"❌ **ตรวจสลิปไม่ผ่าน!**\nเหตุผล: {err_msg}", parse_mode='Markdown')
+            bot.reply_to(message, f"❌ **ตรวจสลิปไม่ผ่าน!(รบกวนแท็กให้พี่กิ๊ก/แม่ยองตรวจสอบ)**\nเหตุผล: {err_msg}", parse_mode='Markdown')
 
     except Exception as e:
         bot.reply_to(message, f"⚠️ **ไม่สามารถตรวจสอบรูปนี้ได้**\nกรุณาส่งสลิปใหม่อีกครั้งครับ", parse_mode='Markdown')
